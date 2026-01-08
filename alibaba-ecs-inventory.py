@@ -610,7 +610,7 @@ def main():
         time.sleep(ECS_SLEEP_BETWEEN_PAGES)
 
     ts = datetime.now().strftime("%Y%m%d-%H%M")
-    base = f"alibaba-ecs-({PROFILE_NAME})-inventory-{ts}"
+    base = f"alibaba-ecs-riyadh-({PROFILE_NAME})-{ts}"
     csv_path = base + ".csv"
     html_path = base + ".html"
     title = f"Alibaba ECS Inventory (Tenant: {PROFILE_NAME}) - Generated on {datetime.now().strftime('%d-%b-%Y %H:%M')}"

@@ -1,0 +1,11 @@
+
+
+# Alibaba Cloud SDK core
+alibabacloud-credentials>=1.0.3
+alibabacloud-tea-openapi>=0.3.7
+
+# Alibaba Cloud ECS SDK (2014-05-26)
+alibabacloud-ecs20140526>=3.0.6
+
+# Data handling
+pandas>=1.5.0
