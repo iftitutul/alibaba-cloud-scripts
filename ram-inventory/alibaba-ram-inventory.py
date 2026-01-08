@@ -25,12 +25,16 @@ LOCAL_TZ = timezone(timedelta(hours=3)) # Riyadh/UTC+3
 DT_FMT = "%d %b %Y %H:%M:%S"
 
 def get_clients():
+    """Initializes clients using modern credential methods to avoid DeprecationWarnings."""
     cred = CredentialClient() 
+    # Use get_credential() to access underlying AK/SK/Token
+    credential_model = cred.get_credential()
+    
     def make_config(endpoint):
         return open_api_models.Config(
-            access_key_id=cred.get_access_key_id(),
-            access_key_secret=cred.get_access_key_secret(),
-            security_token=cred.get_security_token(),
+            access_key_id=credential_model.access_key_id,
+            access_key_secret=credential_model.access_key_secret,
+            security_token=credential_model.security_token,
             endpoint=endpoint,
         )
     return ImsClient(make_config(IMS_ENDPOINT)), RamClient(make_config(RAM_ENDPOINT))
@@ -61,11 +65,11 @@ def build_html(profile, region, headers, rows):
         tds = "".join([f"<td>{html_lib.escape(str(c))}</td>" for c in r])
         tbody_rows += f"<tr>{tds}</tr>"
 
-    title_text = f"Alibaba RAM Audit - ({profile}) | {region}"
+    title_text = f"Alibaba RAM Audit - (Tenant: {profile}) | {region}"
 
     return f"""<!doctype html><html><head><meta charset="utf-8"/><title>{title_text}</title>
 <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; padding: 30px; color: #1e293b; }}
+    body {{ font-family: -apple-system, system-ui, sans-serif; background: #f8fafc; padding: 30px; color: #1e293b; }}
     .header {{ margin-bottom: 25px; border-left: 6px solid #2563eb; padding: 20px; background: #fff; border-radius: 0 12px 12px 0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }}
     .card {{ background: #fff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); overflow: hidden; }}
     .table-container {{ overflow-x: auto; max-height: 750px; }}
@@ -74,7 +78,7 @@ def build_html(profile, region, headers, rows):
     .filter-row th {{ top: 43px; background: #fff; }}
     select {{ width: 100%; padding: 5px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 10px; }}
     td {{ padding: 12px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }}
-    tr:hover {{ background: #f0f9ff; }}
+    tr:hover {{ background: #f0f9ff; font-weight: 500; }}
     .hidden {{ display: none !important; }}
 </style></head>
 <body>
@@ -142,7 +146,8 @@ def main():
     # 2. Extract User Details
     headers = [
         "Profile", "User Name", "Display Name", "Status", "User Creation Date",
-        "Permissions (Direct)", "Groups", "MFA", "AccessKey Pair Status", "AccessKey Pair Generated Date", "AccessKey Pair Last Used", "Last User Login"
+        "Permissions (Direct)", "Groups", "MFA", "AccessKey Pair Status", 
+        "AccessKey Pair Generated Date", "AccessKey Pair Last Used", "Last User Login"
     ]
     data_rows = []
     marker = None
@@ -177,7 +182,7 @@ def main():
                 aks = ak_resp.get("AccessKeys", {}).get("AccessKey", [])
                 if aks:
                     ak_status = "Active" if any(a.get("Status") == "Active" for a in aks) else "Inactive"
-                    # AK Generated Date (Most recent)
+                    # AccessKey Pair Generated Date (Most recent)
                     latest_ak = sorted(aks, key=lambda x: x.get("CreateDate"), reverse=True)[0]
                     ak_gen_date = parse_timestamp(latest_ak.get("CreateDate"))
                     
@@ -193,7 +198,7 @@ def main():
 
             data_rows.append([
                 args.profile, u_name, u.get("DisplayName"), ims_u.get("Status", "Active"), user_creation_date,
-                perms_str, groups, "Yes" if ims_u.get("LastLoginDate") else "No", # Simplified MFA Check if needed
+                perms_str, groups, "Yes" if ims_u.get("LastLoginDate") else "No",
                 ak_status, ak_gen_date, ak_last_used, parse_timestamp(ims_u.get("LastLoginDate"))
             ])
             time.sleep(SLEEP_SEC)
