@@ -1,0 +1,6 @@
+alibabacloud-credentials>=1.0.2
+alibabacloud-tea-openapi>=0.4.0
+
+alibabacloud-ram20150501>=1.2.0
+alibabacloud-ims20190815>=1.0.8
+
