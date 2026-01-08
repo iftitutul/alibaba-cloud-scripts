@@ -25,9 +25,7 @@ LOCAL_TZ = timezone(timedelta(hours=3)) # Riyadh/UTC+3
 DT_FMT = "%d %b %Y %H:%M:%S"
 
 def get_clients():
-    """Initializes clients using modern credential methods to avoid DeprecationWarnings."""
     cred = CredentialClient() 
-    # Use get_credential() to access underlying AK/SK/Token
     credential_model = cred.get_credential()
     
     def make_config(endpoint):
@@ -54,6 +52,12 @@ def parse_timestamp(ts) -> str:
     except: return s
 
 def build_html(profile, region, headers, rows):
+    # Summary Calculations
+    total = len(rows)
+    # Index 3 is now Permissions, Index 6 is AccessKey Status
+    admins = sum(1 for r in rows if "Admin" in str(r[3]))
+    ak_enabled = sum(1 for r in rows if r[6] == "Active")
+
     esc_headers = [html_lib.escape(h) for h in headers]
     filter_cells_list = []
     for i, h in enumerate(esc_headers):
@@ -71,6 +75,11 @@ def build_html(profile, region, headers, rows):
 <style>
     body {{ font-family: -apple-system, system-ui, sans-serif; background: #f8fafc; padding: 30px; color: #1e293b; }}
     .header {{ margin-bottom: 25px; border-left: 6px solid #2563eb; padding: 20px; background: #fff; border-radius: 0 12px 12px 0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }}
+    .stats-container {{ display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }}
+    .stat-card {{ background: #fff; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); flex: 1; min-width: 200px; text-align: center; border-top: 4px solid #64748b; }}
+    .stat-card.admin {{ border-top-color: #f59e0b; }}
+    .stat-card.ak {{ border-top-color: #3b82f6; }}
+    .stat-val {{ display: block; font-size: 26px; font-weight: bold; margin-top: 5px; }}
     .card {{ background: #fff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); overflow: hidden; }}
     .table-container {{ overflow-x: auto; max-height: 750px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 11px; }}
@@ -84,8 +93,15 @@ def build_html(profile, region, headers, rows):
 <body>
     <div class="header">
         <h1 style="margin:0 0 10px 0;">{title_text}</h1>
-        <p style="margin:0; color:#64748b;"><strong>Audit Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Visible: <span id="v-count">{len(rows)}</span> / {len(rows)} Users</p>
+        <p style="margin:0; color:#64748b;"><strong>Audit Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     </div>
+
+    <div class="stats-container">
+        <div class="stat-card">Total Users<span class="stat-val" id="total-val">{total}</span></div>
+        <div class="stat-card admin">Admin Privileges<span class="stat-val">{admins}</span></div>
+        <div class="stat-card ak">AccessKey Users Enabled<span class="stat-val">{ak_enabled}</span></div>
+    </div>
+
     <div class="card"><div class="table-container"><table>
         <thead>
             <tr>{"".join([f"<th>{h}</th>" for h in esc_headers])}</tr>
@@ -118,7 +134,7 @@ def build_html(profile, region, headers, rows):
                 row.classList.toggle('hidden', !match);
                 if(match) count++;
             }});
-            document.getElementById('v-count').textContent = count;
+            document.getElementById('total-val').textContent = count;
         }}
         populateFilters();
     </script>
@@ -143,9 +159,9 @@ def main():
         marker = resp.get("Marker")
         if not resp.get("IsTruncated"): break
 
-    # 2. Extract User Details
+    # 2. Extract User Details (HEADERS UPDATED)
     headers = [
-        "Profile", "User Name", "Display Name", "Status", "User Creation Date",
+        "User Name", "Display Name", "User Creation Date",
         "Permissions (Direct)", "Groups", "MFA", "AccessKey Pair Status", 
         "AccessKey Pair Generated Date", "AccessKey Pair Last Used", "Last User Login"
     ]
@@ -159,10 +175,8 @@ def main():
             u_name, u_id = u.get("UserName"), u.get("UserId")
             ims_u = ims_map.get(u_id, {})
             
-            # User Creation Date
             user_creation_date = parse_timestamp(u.get("CreateDate"))
 
-            # Individual Direct Permissions
             perm_list = []
             try:
                 p_resp = ram_c.list_policies_for_user(ram_models.ListPoliciesForUserRequest(user_name=u_name)).body.to_map()
@@ -170,11 +184,9 @@ def main():
             except: pass
             perms_str = ", ".join(perm_list) if perm_list else "None (Group Only)"
 
-            # Groups
             g_resp = ram_c.list_groups_for_user(ram_models.ListGroupsForUserRequest(user_name=u_name)).body.to_map()
             groups = ", ".join([g.get("GroupName") for g in (g_resp.get("Groups", {}).get("Group", []) or [])]) or "None"
             
-            # Access Key Logic
             ak_status, ak_gen_date, ak_last_used = "None", "N/A", "Never"
             if ims_u.get("UserPrincipalName"):
                 upn = ims_u.get("UserPrincipalName")
@@ -182,7 +194,6 @@ def main():
                 aks = ak_resp.get("AccessKeys", {}).get("AccessKey", [])
                 if aks:
                     ak_status = "Active" if any(a.get("Status") == "Active" for a in aks) else "Inactive"
-                    # AccessKey Pair Generated Date (Most recent)
                     latest_ak = sorted(aks, key=lambda x: x.get("CreateDate"), reverse=True)[0]
                     ak_gen_date = parse_timestamp(latest_ak.get("CreateDate"))
                     
@@ -196,8 +207,9 @@ def main():
                             if lu_date != "Never": ak_last_used = lu_date; break
                         except: pass
 
+            # DATA ROW UPDATED (Removed Status Column)
             data_rows.append([
-                args.profile, u_name, u.get("DisplayName"), ims_u.get("Status", "Active"), user_creation_date,
+                u_name, u.get("DisplayName"), user_creation_date,
                 perms_str, groups, "Yes" if ims_u.get("LastLoginDate") else "No",
                 ak_status, ak_gen_date, ak_last_used, parse_timestamp(ims_u.get("LastLoginDate"))
             ])
@@ -206,7 +218,7 @@ def main():
         marker = resp.get("Marker")
         if not resp.get("IsTruncated"): break
 
-    # 3. Save Files with Timestamps
+    # 3. Save Files
     ts_file = datetime.now().strftime("%Y%m%d_%H%M")
     safe_profile = args.profile.replace(" ", "_")
     base_file = f"alibaba-ram-audit-({safe_profile})_{ts_file}"
