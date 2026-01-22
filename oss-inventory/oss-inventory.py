@@ -9,6 +9,7 @@ import oss2
 import socket
 import urllib.request
 
+
 # ----------------------------
 # 1) Credential Loader
 # ----------------------------
@@ -79,19 +80,11 @@ def ensure_https(endpoint: str) -> str:
 # 3) OSS Security/Logging Helpers
 # ----------------------------
 def get_access_logging_status(bucket_client):
-    """
-    OSS Server Access Logging:
-    - Enabled if target_bucket exists.
-    - Returns: (enabled_yes_no, target_str)
-    """
     enabled = "No"
     target = "N/A"
     try:
         cfg = bucket_client.get_bucket_logging()
 
-        # OSS2 SDK variants:
-        # - cfg.target_bucket / cfg.target_prefix
-        # - cfg.logging.target_bucket / cfg.logging.target_prefix
         tb = getattr(cfg, "target_bucket", None)
         tp = getattr(cfg, "target_prefix", None)
 
@@ -108,16 +101,7 @@ def get_access_logging_status(bucket_client):
 
 
 def http_public_probe(bucket_name: str, region: str) -> str:
-    """
-    Best-effort signal only (NOT "HTTPS-only enforcement"):
-    If the bucket endpoint responds over HTTP (200/3xx/403), it's reachable via HTTP.
-    If it times out/fails, we mark Not Reachable.
-    """
-    # Keep it safe/fast
     socket.setdefaulttimeout(3)
-
-    # Common public endpoint style:
-    # http://<bucket>.oss-<region>.aliyuncs.com/
     url = f"http://{bucket_name}.oss-{region}.aliyuncs.com/"
     try:
         req = urllib.request.Request(url, method="HEAD")
@@ -157,14 +141,12 @@ def main():
 
     for b in buckets:
         try:
-            # Force HTTPS for secure transfer from *this script*
             endpoint_https = ensure_https(getattr(b, "extranet_endpoint", ""))
             b_client = oss2.Bucket(auth, endpoint_https, b.name)
 
             info = b_client.get_bucket_info()
             stat = b_client.get_bucket_stat()
 
-            # Optional features
             try:
                 versioning = b_client.get_bucket_versioning().status or "Off"
             except Exception:
@@ -175,14 +157,9 @@ def main():
             except Exception:
                 accel = "Disabled"
 
-            # Access logging status
             access_logging, log_target = get_access_logging_status(b_client)
 
-            # Best-effort HTTP reachability probe
-            if args.skip_http_probe:
-                http_probe = "Skipped"
-            else:
-                http_probe = http_public_probe(b.name, args.region)
+            http_probe = "Skipped" if args.skip_http_probe else http_public_probe(b.name, args.region)
 
             total_bytes += stat.storage_size_in_bytes
             total_objects += stat.object_count
@@ -199,11 +176,10 @@ def main():
                     "Versioning": versioning,
                     "Acceleration": accel,
                     "Created At": safe_date(getattr(info, "creation_date", None)),
-                    # ✅ Added columns
-                    "Client TLS": "Yes (HTTPS)",          # secure transfer from this script
-                    "Access Logging": access_logging,     # server access logging status
-                    "Log Target": log_target,             # destination bucket/prefix if enabled
-                    "HTTP Public Probe": http_probe,      # best-effort indicator (not HTTPS-only enforcement)
+                    "Client TLS": "Yes (HTTPS)",
+                    "Access Logging": access_logging,
+                    "Log Target": log_target,
+                    "HTTP Public Probe": http_probe,
                 }
             )
 
@@ -230,7 +206,6 @@ def main():
             rows_html += f"<td>{disp_val}</td>"
         rows_html += "</tr>"
 
-    # Columns to use dropdown filters (top filter row)
     select_filter_cols = [
         "Region",
         "Storage Class",
@@ -255,15 +230,42 @@ def main():
     .main-header {{ margin-bottom: 25px; }}
     .main-header h1 {{ margin: 0; font-size: 26px; color: #1e293b; }}
     .meta-info {{ color: #64748b; font-size: 13px; margin-top: 5px; font-weight: 500; }}
-    .stats-bar {{ display: flex; gap: 20px; margin-bottom: 30px; }}
-    .card {{ background: white; padding: 20px; border-radius: 12px; flex: 1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border-top: 4px solid #3b82f6; }}
+    .stats-bar {{ display: flex; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }}
+    .card {{ background: white; padding: 20px; border-radius: 12px; flex: 1; min-width: 220px;
+             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border-top: 4px solid #3b82f6; }}
     .card-label {{ font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }}
     .card-val {{ font-size: 24px; font-weight: 800; display: block; margin-top: 5px; color: #1e293b; }}
-    .table-container {{ background: white; padding: 20px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }}
+
+    .table-container {{
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+      overflow-x: auto;
+    }}
+
     table {{ font-size: 13px; width: 100% !important; }}
-    thead th {{ background: #f8fafc; color: #475569; font-weight: 700; border-bottom: 2px solid #e2e8f0 !important; }}
+    thead th {{ background: #f8fafc; color: #475569; font-weight: 700;
+               border-bottom: 2px solid #e2e8f0 !important; white-space: nowrap; }}
     .filter-row th {{ background: #ffffff !important; padding: 10px !important; }}
-    select, input {{ width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11px; }}
+
+    select, input {{
+      width: 100%;
+      padding: 6px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 11px;
+      background: #fff;
+      box-sizing: border-box;
+    }}
+
+    /* ✅ FIX: remove ugly outline "block" and use clean focus ring */
+    input:focus, select:focus {{
+      outline: none !important;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+    }}
+
     .badge {{ min-width: 70px; display: inline-block; text-align: center; }}
   </style>
 </head>
@@ -280,7 +282,7 @@ def main():
   </div>
 
   <div class="table-container">
-    <table id="masdrTable" class="display nowrap">
+    <table id="masdrTable" class="display nowrap" style="width:100%">
       <thead>
         <tr id="headerRow">{headers}</tr>
         <tr class="filter-row"></tr>
@@ -291,20 +293,21 @@ def main():
 
   <script src="https://code.jquery.com/jquery-3.7.0.js"></script>
   <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
 
   <script>
     $(document).ready(function() {{
       const SELECT_COLS = {json.dumps(select_filter_cols)};
 
-      // Add filters row
+      // Create filter row first
       $('#masdrTable thead tr:eq(0) th').each(function (i) {{
-        var title = $(this).text();
-        var filterCell = $('<th></th>').appendTo('#masdrTable thead tr:eq(1)');
+        const title = $(this).text();
+        const filterCell = $('<th></th>').appendTo('#masdrTable thead tr:eq(1)');
 
         if (SELECT_COLS.includes(title)) {{
-          var select = $('<select><option value="">All</option></select>').appendTo(filterCell);
+          const select = $('<select><option value="">All</option></select>').appendTo(filterCell);
           select.on('change', function () {{
-            var val = $.fn.dataTable.util.escapeRegex($(this).val());
+            const val = $.fn.dataTable.util.escapeRegex($(this).val());
             table.column(i).search(val ? '^' + val + '$' : '', true, false).draw();
           }});
         }} else {{
@@ -321,27 +324,38 @@ def main():
       var table = $('#masdrTable').DataTable({{
         orderCellsTop: true,
         fixedHeader: true,
+        scrollX: true,                 // ✅ keeps header/filter aligned on wide tables
         pageLength: 50,
         dom: 'lrtip',
         drawCallback: function() {{
-          var info = this.api().page.info();
+          const info = this.api().page.info();
           $('#statCount').text(info.recordsDisplay);
         }},
         initComplete: function () {{
-          var api = this.api();
+          const api = this.api();
+
+          // Populate dropdowns with unique values
           api.columns().every(function (i) {{
-            var column = this;
-            var title = column.header().textContent;
+            const column = this;
+            const title = column.header().textContent;
+
             if (SELECT_COLS.includes(title)) {{
-              var select = $('.filter-row th:eq(' + i + ') select');
+              const select = $('.filter-row th:eq(' + i + ') select');
               column.data().unique().sort().each(function (d) {{
-                // Clean badge HTML if present (ACL/Redundancy)
-                var cleanD = (d + '').replace(/<[^>]*>?/gm, '').trim();
+                const cleanD = (d + '').replace(/<[^>]*>?/gm, '').trim();
                 if (cleanD) select.append('<option value="' + cleanD + '">' + cleanD + '</option>');
               }});
             }}
           }});
+
+          // ✅ FIX: force columns alignment after init
+          api.columns.adjust().draw(false);
         }}
+      }});
+
+      // ✅ FIX: keep alignment on resize
+      $(window).on('resize', function() {{
+        table.columns.adjust();
       }});
     }});
   </script>
@@ -349,16 +363,13 @@ def main():
 </html>
 """
 
-    # ----------------------------
-    # 5) Final Export
-    # ----------------------------
     out_base = f"masdr-oss-dashboard-({tenant})-{file_ts}"
     with open(f"{out_base}.html", "w", encoding="utf-8") as f:
         f.write(html_out)
 
     pd.DataFrame(data_rows).to_csv(f"{out_base}.csv", index=False)
 
-    print(f"\n✨ SUCCESS: {out_base}.html generated with Top-Column Filters.")
+    print(f"\n✨ SUCCESS: {out_base}.html generated with fixed/aligned header + clean focus outline.")
 
 
 if __name__ == "__main__":
